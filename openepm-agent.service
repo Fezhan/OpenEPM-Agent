@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenEPM Agent
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+Group=YOUR_USERNAME
+WorkingDirectory=/path/to/your/project/agent
+Environment="PATH=/path/to/your/project/agent/.venv/bin"
+ExecStart=/path/to/your/project/agent/.venv/bin/python -m openepm_agent.cli start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

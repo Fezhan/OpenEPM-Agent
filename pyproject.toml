@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openepm-agent"
+version = "0.1.0"
+description = "Lightweight endpoint management agent for SMEs"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+]
+
+[project.scripts]
+openepm-agent = "openepm_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
