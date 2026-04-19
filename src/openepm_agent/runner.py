@@ -34,15 +34,11 @@ def register():
     response.raise_for_status()
     data = response.json()
 
-    auth_data = {
+    state = {
         "agent_id": data["agent_id"],
         "auth_token": data["auth_token"],
-        "server_url": SERVER_URL.rstrip("/"),
-        "mac_address": get_mac_address(),
     }
-
-    with open("agent_auth.json", "w") as f:
-        json.dump(auth_data, f)
+    save_state(state)
 
     return data
 
@@ -93,4 +89,13 @@ def run_loop():
         except Exception as exc:
             print(f"Agent error: {exc}")
 
-        time.sleep(POLL_INTERVAL)
+        except Exception as exc:
+        print(f"Agent error: {exc}")
+
+        # If not enrolled yet, keep retrying every 60 seconds
+        if not state:
+            print("Enrollment failed, retrying in 60 seconds...")
+            time.sleep(ENROLL_RETRY_INTERVAL)
+        else:
+            # Already enrolled: keep service alive and retry normal loop
+            time.sleep(POLL_INTERVAL)
