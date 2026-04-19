@@ -10,3 +10,10 @@ from openepm_agent.runner import save_state, load_state
 save_state({"agent_id": 123, "auth_token": "test-token"})
 print(load_state())
 PY
+
+#mac address
+python - <<'PY'
+from openepm_agent.details import get_wireless_interface, get_mac_address
+print("Wireless interface:", get_wireless_interface())
+print("Wireless MAC:", get_mac_address())
+PY
