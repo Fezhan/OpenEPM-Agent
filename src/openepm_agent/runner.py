@@ -1,7 +1,7 @@
 import json
 import time
 from .config import CONFIG_DIR, CONFIG_FILE, POLL_INTERVAL, BOOTSTRAP_SECRET
-from .details import get_hostname, get_mac_address, get_os_info
+from .details import get_hostname, get_mac_address, get_linux_family
 from .api import register_agent, heartbeat, poll_command, submit_result
 from .dispatch import dispatch_action
 
@@ -23,7 +23,7 @@ def ensure_registered():
     response = register_agent(
         hostname=get_hostname(),
         mac_address=get_mac_address(),
-        os_type=get_os_info(),
+        os_type=get_linux_family(),
         bootstrap_secret=BOOTSTRAP_SECRET,
     )
 
