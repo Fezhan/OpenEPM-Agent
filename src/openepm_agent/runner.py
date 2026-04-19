@@ -1,69 +1,64 @@
 import json
-import subprocess
 import time
-from pathlib import Path
-from .config import (
-    CONFIG_DIR,
-    CONFIG_FILE,
-    POLL_INTERVAL,
-    get_hostname,
-    get_ip_address,
-    get_os_type,
-)
+from .config import CONFIG_DIR, CONFIG_FILE, POLL_INTERVAL, BOOTSTRAP_SECRET
+from .details import get_hostname, get_mac_address, get_os_info
 from .api import register_agent, heartbeat, poll_command, submit_result
+from .dispatch import dispatch_action
 
-
-def load_agent_id():
+def load_state():
     if CONFIG_FILE.exists():
-        data = json.loads(CONFIG_FILE.read_text())
-        return data.get("agent_id")
-    return None
+        return json.loads(CONFIG_FILE.read_text())
+    return {}
 
-
-def save_agent_id(agent_id):
+def save_state(state):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps({"agent_id": agent_id}))
-
+    CONFIG_FILE.write_text(json.dumps(state))
 
 def ensure_registered():
-    agent_id = load_agent_id()
-    if agent_id:
-        return agent_id
+    state = load_state()
 
-    agent = register_agent(
+    if state.get("agent_id") and state.get("auth_token"):
+        return state
+
+    response = register_agent(
         hostname=get_hostname(),
-        ip_address=get_ip_address(),
-        os_type=get_os_type(),
+        mac_address=get_mac_address(),
+        os_type=get_os_info(),
+        bootstrap_secret=BOOTSTRAP_SECRET,
     )
-    save_agent_id(agent["id"])
-    return agent["id"]
 
-
-def execute_command(command_text):
-    try:
-        result = subprocess.run(
-            command_text,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        output = (result.stdout or "") + (result.stderr or "")
-        status = "completed" if result.returncode == 0 else "failed"
-        return output.strip(), status
-    except Exception as exc:
-        return str(exc), "failed"
-
+    state = {
+        "agent_id": response["agent_id"],
+        "auth_token": response["auth_token"],
+    }
+    save_state(state)
+    return state
 
 def run_loop():
-    agent_id = ensure_registered()
+    state = ensure_registered()
+    agent_id = state["agent_id"]
+    auth_token = state["auth_token"]
+
     while True:
         try:
-            heartbeat(agent_id)
-            command = poll_command(agent_id)
+            heartbeat(agent_id, auth_token)
+            command = poll_command(agent_id, auth_token)
+
             if command:
-                output, status = execute_command(command["command_text"])
-                submit_result(command["id"], output, status)
+                result = dispatch_action(
+                    command["action"],
+                    command.get("params", {})
+                )
+                submit_result(
+                    command_id=command["id"],
+                    auth_token=auth_token,
+                    stdout=result.get("stdout", ""),
+                    stderr=result.get("stderr", ""),
+                    status=result.get("status", "failed"),
+                    exit_code=result.get("exit_code", 1),
+                )
+
         except Exception as exc:
             print(f"Agent error: {exc}")
+
         time.sleep(POLL_INTERVAL)
