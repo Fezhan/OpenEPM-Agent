@@ -17,14 +17,20 @@ def register_agent(hostname, bootstrap_secret, os_type, mac_address):
     return response.json()["agent"]
 
 
-def heartbeat(agent_id):
-    response = requests.post(f"{SERVER_URL}/agents/{agent_id}/heartbeat", timeout=10)
+def heartbeat(agent_id, auth_token):
+    response = requests.post(
+        f"{SERVER_URL}/agents/{agent_id}/heartbeat",
+        headers=auth_headers(auth_token),
+        timeout=10)
     response.raise_for_status()
     return response.json()
 
 
-def poll_command(agent_id):
-    response = requests.get(f"{SERVER_URL}/agents/{agent_id}/commands", timeout=30)
+def poll_command(agent_id, auth_token):
+    response = requests.get(
+        f"{SERVER_URL}/agents/{agent_id}/commands",
+        headers=auth_headers(auth_token),
+        timeout=30)
     response.raise_for_status()
     return response.json().get("command")
 
