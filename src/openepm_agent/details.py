@@ -1,7 +1,6 @@
 import socket
-import uuid
+from pathlib import Path
 import distro
-import psutil
 
 def get_hostname():
     return socket.gethostname()
@@ -9,9 +8,25 @@ def get_hostname():
 def get_os_info():
     return distro.id()
 
+def get_wireless_interface():
+    file = Path("/proc/net/wireless")
+
+    if not file.exists():
+        raise RuntimeError("/proc/net/wireless not found")
+
+    lines = file.read_text().splitlines()
+
+    for line in lines[2:]:
+        line = line.strip()
+        if not line:
+            continue
+        if ":" in line:
+            return line.split(":", 1)[0].strip()
+
+    raise RuntimeError("No wireless interface found in /proc/net/wireless")
+
 def get_mac_address():
-    mac_num = uuid.getnode()
-    return ":".join(f"{(mac_num >> shift) & 0xff:02X}" for shift in range(40, -1, -8))
+
 
 def get_linux_family():
     distro_id = distro.id().lower()
