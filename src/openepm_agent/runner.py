@@ -3,7 +3,7 @@ import time
 
 import requests
 
-from .config import CONFIG_DIR, CONFIG_FILE, POLL_INTERVAL, BOOTSTRAP_SECRET, SERVER_URL, REQUEST_TIMEOUT
+from .config import CONFIG_DIR, CONFIG_FILE, POLL_INTERVAL, BOOTSTRAP_SECRET, SERVER_URL, REQUEST_TIMEOUT, ENROLL_RETRY_INTERVAL
 from .details import get_hostname, get_mac_address, get_linux_family
 from .api import register_agent, heartbeat, poll_command, submit_result
 from .dispatch import dispatch_action
@@ -63,12 +63,17 @@ def ensure_registered():
     return state
 
 def run_loop():
-    state = ensure_registered()
-    agent_id = state["agent_id"]
-    auth_token = state["auth_token"]
+    state = None
 
     while True:
         try:
+            if not state:
+                state = ensure_registered()
+                print(f"Enrollment successful: agent_id={state['agent_id']}")
+
+            agent_id = state["agent_id"]
+            auth_token = state["auth_token"]
+
             heartbeat(agent_id, auth_token)
             command = poll_command(agent_id, auth_token)
 
@@ -86,16 +91,13 @@ def run_loop():
                     exit_code=result.get("exit_code", 1),
                 )
 
+            time.sleep(POLL_INTERVAL)
+
         except Exception as exc:
             print(f"Agent error: {exc}")
 
-        except Exception as exc:
-        print(f"Agent error: {exc}")
-
-        # If not enrolled yet, keep retrying every 60 seconds
-        if not state:
-            print("Enrollment failed, retrying in 60 seconds...")
-            time.sleep(ENROLL_RETRY_INTERVAL)
-        else:
-            # Already enrolled: keep service alive and retry normal loop
-            time.sleep(POLL_INTERVAL)
+            if not state:
+                print("Enrollment failed, retrying in 60 seconds...")
+                time.sleep(ENROLL_RETRY_INTERVAL)
+            else:
+                time.sleep(POLL_INTERVAL)
