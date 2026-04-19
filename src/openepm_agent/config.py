@@ -1,29 +1,12 @@
 import os
-import socket
-import distro
 from pathlib import Path
+
+from openepm_agent.details import BOOTSTRAP_SECRET
 
 SERVER_URL = os.getenv("OPENEPM_SERVER_URL", "http://localhost:5000")
 POLL_INTERVAL = int(os.getenv("OPENEPM_POLL_INTERVAL", "5"))
 CONFIG_DIR = Path.home() / ".config" / "openepm-agent"
 CONFIG_FILE = CONFIG_DIR / "agent.conf"
-
-
-def get_hostname():
-    return socket.gethostname()
-
-
-def get_ip_address():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
-
-
-def get_os_type():
-    return distro.id()
+BOOTSTRAP_SECRET = os.getenv("OPENEPM_BOOTSTRAP_SECRET", "my-bootstrap-secret")
+REQUEST_TIMEOUT = int(os.getenv("OPENEPM_REQUEST_TIMEOUT", "10"))
 
