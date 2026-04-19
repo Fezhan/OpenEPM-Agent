@@ -23,7 +23,7 @@ def ensure_registered():
     response = register_agent(
         hostname=get_hostname(),
         mac_address=get_mac_address(),
-        os_type=get_linux_family(),
+        os_info=get_linux_family(),
         bootstrap_secret=BOOTSTRAP_SECRET,
     )
 
