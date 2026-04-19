@@ -20,8 +20,7 @@ pip install -e .
 ## Running
 
 ```bash
-export OPENEPM_SERVER_URL=http://localhost:5000
-openepm-agent start
+Copy config.conf to /etc/openepm-agent/config.conf, edit it to contain the server URl
 ```
 
 ## Service installation
@@ -35,3 +34,5 @@ sudo systemctl enable openepm-agent
 sudo systemctl start openepm-agent
 sudo systemctl status openepm-agent
 ```
+
+
