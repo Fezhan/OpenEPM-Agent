@@ -35,10 +35,16 @@ def poll_command(agent_id, auth_token):
     return response.json().get("command")
 
 
-def submit_result(command_id, output, status):
+def submit_result(command_id, auth_token, stdout, stderr, status, exit_code):
     response = requests.post(
         f"{SERVER_URL}/commands/{command_id}/result",
-        json={"output": output, "status": status},
+        headers=auth_headers(auth_token),
+        json={
+            "stdout": stdout,
+            "stderr": stderr,
+            "status": status,
+            "exit_code": exit_code,
+        },
         timeout=10,
     )
     response.raise_for_status()
