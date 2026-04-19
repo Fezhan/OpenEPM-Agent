@@ -2,13 +2,13 @@ import requests
 from .config import SERVER_URL
 
 
-def register_agent(hostname, bootstrap_secret, os_type, mac_address):
+def register_agent(hostname, bootstrap_secret, os_info, mac_address):
     response = requests.post(
         f"{SERVER_URL}/agents/register",
         json={
             "hostname": hostname,
             "bootstrap_secret": bootstrap_secret,
-            "os_type": os_type,
+            "os_info": os_info,
             "mac_address": mac_address
         },
         timeout=10,
