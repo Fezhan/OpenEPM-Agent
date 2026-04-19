@@ -3,6 +3,7 @@ import socket
 import platform
 import uuid
 import json
+import distro
 from pathlib import Path
 
 SERVER_URL = "http://127.0.0.1:5000"
@@ -13,7 +14,7 @@ def get_hostname():
     return socket.gethostname()
 
 def get_os_info():
-    return platform.platform()
+    return distro.id()
 
 def get_mac_address():
     mac_num = uuid.getnode()
