@@ -1,6 +1,9 @@
 import json
 import time
-from .config import CONFIG_DIR, CONFIG_FILE, POLL_INTERVAL, BOOTSTRAP_SECRET
+
+import requests
+
+from .config import CONFIG_DIR, CONFIG_FILE, POLL_INTERVAL, BOOTSTRAP_SECRET, SERVER_URL, REQUEST_TIMEOUT
 from .details import get_hostname, get_mac_address, get_linux_family
 from .api import register_agent, heartbeat, poll_command, submit_result
 from .dispatch import dispatch_action
@@ -13,6 +16,35 @@ def load_state():
 def save_state(state):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(state))
+
+def register():
+    payload = {
+        "mac_address": get_mac_address(),
+        "hostname": get_hostname(),
+        "os_info": get_linux_family(),
+        "bootstrap_secret": BOOTSTRAP_SECRET,
+    }
+
+    response = requests.post(
+        f"{SERVER_URL.rstrip('/')}/agents/register",
+        json=payload,
+        timeout=REQUEST_TIMEOUT,
+    )
+
+    response.raise_for_status()
+    data = response.json()
+
+    auth_data = {
+        "agent_id": data["agent_id"],
+        "auth_token": data["auth_token"],
+        "server_url": SERVER_URL.rstrip("/"),
+        "mac_address": get_mac_address(),
+    }
+
+    with open("agent_auth.json", "w") as f:
+        json.dump(auth_data, f)
+
+    return data
 
 def ensure_registered():
     state = load_state()
