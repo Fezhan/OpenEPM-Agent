@@ -1,8 +1,6 @@
 import os
 from pathlib import Path
 
-from openepm_agent.details import BOOTSTRAP_SECRET
-
 SERVER_URL = os.getenv("OPENEPM_SERVER_URL", "http://localhost:5000")
 POLL_INTERVAL = int(os.getenv("OPENEPM_POLL_INTERVAL", "5"))
 CONFIG_DIR = Path.home() / ".config" / "openepm-agent"

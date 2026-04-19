@@ -1,6 +1,7 @@
 import socket
 import uuid
 import distro
+import psutil
 
 def get_hostname():
     return socket.gethostname()
