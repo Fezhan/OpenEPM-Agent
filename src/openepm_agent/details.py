@@ -26,7 +26,13 @@ def get_wireless_interface():
     raise RuntimeError("No wireless interface found in /proc/net/wireless")
 
 def get_mac_address():
+    iface = get_wireless_interface()
+    address_file = Path(f"/sys/class/net/{iface}/address")
 
+    if not address_file.exists():
+        raise RuntimeError(f"MAC address file not found for interface: {iface}")
+
+    return address_file.read_text().strip().upper()
 
 def get_linux_family():
     distro_id = distro.id().lower()
