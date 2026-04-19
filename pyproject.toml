@@ -9,6 +9,7 @@ description = "Lightweight endpoint management agent for SMEs"
 requires-python = ">=3.10"
 dependencies = [
     "requests",
+    "distro",
 ]
 
 [project.scripts]

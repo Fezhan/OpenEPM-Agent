@@ -1,5 +1,6 @@
 import os
 import socket
+import distro
 from pathlib import Path
 
 SERVER_URL = os.getenv("OPENEPM_SERVER_URL", "http://localhost:5000")
@@ -24,4 +25,5 @@ def get_ip_address():
 
 
 def get_os_type():
-    return "linux"
+    return distro.id()
+
