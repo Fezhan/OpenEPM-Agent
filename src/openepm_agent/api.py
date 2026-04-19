@@ -2,13 +2,14 @@ import requests
 from .config import SERVER_URL
 
 
-def register_agent(hostname, ip_address, os_type):
+def register_agent(hostname, bootstrap_secret, os_type, mac_address):
     response = requests.post(
         f"{SERVER_URL}/agents/register",
         json={
             "hostname": hostname,
-            "ip_address": ip_address,
+            "bootstrap_secret": bootstrap_secret,
             "os_type": os_type,
+            "mac_address": mac_address
         },
         timeout=10,
     )
@@ -36,3 +37,6 @@ def submit_result(command_id, output, status):
     )
     response.raise_for_status()
     return response.json()
+
+def auth_headers(auth_token):
+    return {"Authorization": f"Bearer {auth_token}"}
