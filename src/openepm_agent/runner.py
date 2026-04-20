@@ -1,13 +1,14 @@
+# agent/runner.py
 import json
+import os
+import sys
 import time
 import requests
 
-from .config import CONFIG_DIR, CONFIG_FILE, POLL_INTERVAL, BOOTSTRAP_SECRET
+from .config import CONFIG_DIR, CONFIG_FILE, POLL_INTERVAL, BOOTSTRAP_SECRET, ENROLL_RETRY_INTERVAL
 from .details import get_hostname, get_mac_address, get_linux_family
 from .api import register_agent, heartbeat, poll_command, submit_result
-from .dispatch import dispatch_action
-
-ENROLL_RETRY_INTERVAL = 60
+from .dispatch import dispatch_command
 
 
 def load_state():
@@ -15,15 +16,12 @@ def load_state():
         if CONFIG_FILE.exists():
             text = CONFIG_FILE.read_text()
             if not text.strip():
-                # Empty file; treat as no state
                 return {}
             return json.loads(text)
     except json.JSONDecodeError as exc:
-        print(f"load_state failed: {exc}; ignoring corrupt state file")
-        return {}
+        print(f"[agent] load_state failed: {exc}; ignoring corrupt state file")
     except Exception as exc:
-        print(f"load_state unexpected error: {exc}")
-        return {}
+        print(f"[agent] load_state unexpected error: {exc}")
     return {}
 
 
@@ -34,8 +32,7 @@ def save_state(state):
 
 def ensure_registered():
     """
-    Returns state dict with agent_id/auth_token or None if enrollment failed.
-    Never retries here; run_loop decides what to do.
+    Returns state dict with agent_id/auth_token, or None if enrollment failed.
     """
     state = load_state()
 
@@ -49,9 +46,8 @@ def ensure_registered():
             os_info=get_linux_family(),
             bootstrap_secret=BOOTSTRAP_SECRET,
         )
-
         state = {
-            "agent_id": response["agent_id"],
+            "agent_id":   response["agent_id"],
             "auth_token": response["auth_token"],
         }
         save_state(state)
@@ -59,65 +55,82 @@ def ensure_registered():
 
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else None
-        body = exc.response.text if exc.response is not None else ""
-        print(f"Enrollment HTTP error: {status} {body}")
-
+        body   = exc.response.text        if exc.response is not None else ""
+        print(f"[agent] Enrollment HTTP error: {status} {body}")
         if status == 409:
-            print("Server says this device is already enrolled, but no local state exists.")
-            print("Delete the existing device on the server or implement credential recovery.")
+            print("[agent] Server says this device is already enrolled but no local state exists.")
+            print("[agent] Remove the device on the server or restore agent.conf manually.")
         return None
 
     except KeyError as exc:
-        print(f"Enrollment response missing field: {exc}")
+        print(f"[agent] Enrollment response missing field: {exc}")
         return None
 
     except Exception as exc:
-        print(f"Enrollment error: {exc}")
+        print(f"[agent] Enrollment error: {exc}")
         return None
+
 
 def run_loop():
     state = None
 
     while True:
         try:
+            # ── Enrollment ────────────────────────────────────────────────────
             if not state:
                 state = ensure_registered()
                 if state:
-                    print(f"Enrollment successful: agent_id={state['agent_id']}")
+                    print(f"[agent] Enrolled: agent_id={state['agent_id']}")
                 else:
-                    # No state yet; either not approved, secret wrong, or 409 path.
-                    print("Enrollment failed or already enrolled; "
-                          "retrying enrollment in 60 seconds...")
+                    print(f"[agent] Enrollment failed. Retrying in {ENROLL_RETRY_INTERVAL}s...")
                     time.sleep(ENROLL_RETRY_INTERVAL)
                     continue
 
-            agent_id = state["agent_id"]
+            agent_id   = state["agent_id"]
             auth_token = state["auth_token"]
 
+            # ── Heartbeat ─────────────────────────────────────────────────────
             heartbeat(agent_id, auth_token)
+
+            # ── Poll for command ──────────────────────────────────────────────
             command = poll_command(agent_id, auth_token)
 
             if command:
-                result = dispatch_action(
-                    command["action"],
-                    command.get("params", {})
-                )
+                execution_id = command["execution_id"]
+                name         = command.get("definition", {}).get("name", "unknown")
+                print(f"[agent] Executing: {name} (execution_id={execution_id})")
+
+                result = dispatch_command(command)
+
+                # Submit result before any post-action
                 submit_result(
-                    command_id=command["id"],
+                    execution_id=execution_id,
                     auth_token=auth_token,
-                    stdout=result.get("stdout", ""),
-                    stderr=result.get("stderr", ""),
-                    status=result.get("status", "failed"),
+                    output=result.get("stdout", ""),
+                    error=result.get("stderr",  ""),
+                    status=result.get("status",  "failed"),
                     exit_code=result.get("exit_code", 1),
                 )
+                print(f"[agent] Result submitted: {result['status']}")
+
+                # Handle post-actions (e.g. restart_agent restarts after ack)
+                post_action = result.get("_post_action")
+                if post_action == "restart":
+                    print("[agent] Restarting agent process...")
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
 
             time.sleep(POLL_INTERVAL)
 
-        except Exception as exc:
-            print(f"Agent error: {exc}")
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            print(f"[agent] HTTP error: {status}")
+            if status == 401:
+                print("[agent] Auth token rejected. Clearing state and re-enrolling...")
+                state = None
+                if CONFIG_FILE.exists():
+                    CONFIG_FILE.unlink()
+            time.sleep(POLL_INTERVAL)
 
-            if not state:
-                print("Enrollment failed, retrying in 60 seconds...")
-                time.sleep(ENROLL_RETRY_INTERVAL)
-            else:
-                time.sleep(POLL_INTERVAL)
+        except Exception as exc:
+            print(f"[agent] Error: {exc}")
+            time.sleep(POLL_INTERVAL)
