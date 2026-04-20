@@ -1,5 +1,6 @@
 import argparse
 from openepm_agent.runner import run_loop
+from openepm_agent.api import register_agent as register
 
 
 def main():
@@ -16,6 +17,8 @@ def main():
 
     if args.command == "start":
         run_loop()
+    elif args.command == "enroll":
+        register()
 
 
 if __name__ == "__main__":
