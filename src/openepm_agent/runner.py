@@ -11,8 +11,19 @@ ENROLL_RETRY_INTERVAL = 60
 
 
 def load_state():
-    if CONFIG_FILE.exists():
-        return json.loads(CONFIG_FILE.read_text())
+    try:
+        if CONFIG_FILE.exists():
+            text = CONFIG_FILE.read_text()
+            if not text.strip():
+                # Empty file; treat as no state
+                return {}
+            return json.loads(text)
+    except json.JSONDecodeError as exc:
+        print(f"load_state failed: {exc}; ignoring corrupt state file")
+        return {}
+    except Exception as exc:
+        print(f"load_state unexpected error: {exc}")
+        return {}
     return {}
 
 
@@ -38,28 +49,31 @@ def ensure_registered():
             os_info=get_linux_family(),
             bootstrap_secret=BOOTSTRAP_SECRET,
         )
+
+        state = {
+            "agent_id": response["agent_id"],
+            "auth_token": response["auth_token"],
+        }
+        save_state(state)
+        return state
+
     except requests.HTTPError as exc:
-        status = exc.response.status_code if exc.response else None
-        body = exc.response.text if exc.response else ""
+        status = exc.response.status_code if exc.response is not None else None
+        body = exc.response.text if exc.response is not None else ""
         print(f"Enrollment HTTP error: {status} {body}")
 
-        # 409 means the server thinks this device is already enrolled.
-        # In that case, do NOT keep hammering /agents/register.
         if status == 409:
-            print("Device already enrolled according to server; "
-                  "will not retry enrollment in this process.")
-            return None
-
-        # For other errors (403, 500, etc.), caller decides whether to retry.
+            print("Server says this device is already enrolled, but no local state exists.")
+            print("Delete the existing device on the server or implement credential recovery.")
         return None
 
-    state = {
-        "agent_id": response["agent_id"],
-        "auth_token": response["auth_token"],
-    }
-    save_state(state)
-    return state
+    except KeyError as exc:
+        print(f"Enrollment response missing field: {exc}")
+        return None
 
+    except Exception as exc:
+        print(f"Enrollment error: {exc}")
+        return None
 
 def run_loop():
     state = None
