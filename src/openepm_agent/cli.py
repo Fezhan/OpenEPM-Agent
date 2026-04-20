@@ -1,6 +1,5 @@
 import argparse
-from openepm_agent.runner import run_loop
-from openepm_agent.api import register_agent as register
+from openepm_agent.runner import run_loop, ensure_registered
 
 
 def main():
@@ -10,7 +9,7 @@ def main():
     )
     parser.add_argument(
         "command",
-        choices=["start"],
+        choices=["start", "enroll"],
         help="Command to run",
     )
     args = parser.parse_args()
@@ -18,7 +17,8 @@ def main():
     if args.command == "start":
         run_loop()
     elif args.command == "enroll":
-        register()
+        result = ensure_registered()
+        print(result)
 
 
 if __name__ == "__main__":
