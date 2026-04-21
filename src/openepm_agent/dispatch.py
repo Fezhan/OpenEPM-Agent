@@ -1,8 +1,53 @@
 #!/usr/bin/env python
 import subprocess
 import shlex
+import os
 from .systemfunctions import run_command
 from .details import get_linux_family
+
+# ── Desktop notification helper ───────────────────────────────────────────────
+
+def _notify(title: str, message: str, urgency: str = "normal", icon: str = "dialog-information"):
+    """
+    Send a libnotify desktop notification.
+    urgency: low | normal | critical
+    Runs as the logged-in user via DBUS_SESSION_BUS_ADDRESS.
+    Silently fails if notify-send is not available.
+    """
+    try:
+        # Find the display session env for the logged-in user
+        env = os.environ.copy()
+
+        # Ensure DBUS session is available (needed when agent runs as root/service)
+        if "DBUS_SESSION_BUS_ADDRESS" not in env:
+            # Try to find it from a running user session
+            result = subprocess.run(
+                ["pgrep", "-u", env.get("USER", "handesh"), "-x", "Hyprland"],
+                capture_output=True, text=True
+            )
+            pid = result.stdout.strip()
+            if pid:
+                env_file = f"/proc/{pid}/environ"
+                try:
+                    with open(env_file, "r") as f:
+                        for entry in f.read().split("\0"):
+                            if "=" in entry:
+                                k, v = entry.split("=", 1)
+                                if k in ("DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"):
+                                    env[k] = v
+                except Exception:
+                    pass
+
+        subprocess.Popen(
+            ["notify-send", "--urgency", urgency, "--icon", icon, "--app-name", "OpenEPM Agent", title, message],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        pass  # notify-send not installed — silently skip
+    except Exception:
+        pass
 
 
 # ── OS-aware command map ──────────────────────────────────────────────────────
@@ -20,6 +65,7 @@ SYSTEM_UPDATE_COMMANDS = {
 # ── Internal command handlers ─────────────────────────────────────────────────
 
 def handle_ping(params, os_family=None):
+    _notify("Agent Ping", "Ping received — sending pong.", urgency="low")
     return {
         "status":    "completed",
         "stdout":    "pong",
@@ -29,6 +75,7 @@ def handle_ping(params, os_family=None):
 
 
 def handle_get_system_info(params, os_family=None):
+    _notify("System Info", "Collecting system information...", urgency="low")
     import platform, socket, json
     import psutil
 
@@ -42,6 +89,7 @@ def handle_get_system_info(params, os_family=None):
         "disk_total_gb": round(psutil.disk_usage("/").total / 1e9, 2),
         "disk_used_pct": psutil.disk_usage("/").percent,
     }
+    _notify("System Info", "System information collected successfully.", urgency="low", icon="dialog-information")
     return {
         "status":    "completed",
         "stdout":    json.dumps(info, indent=2),
@@ -51,6 +99,7 @@ def handle_get_system_info(params, os_family=None):
 
 
 def handle_get_process_list(params, os_family=None):
+    _notify("Process List", "Collecting running processes...", urgency="low")
     import json, psutil
 
     procs = []
@@ -65,6 +114,7 @@ def handle_get_process_list(params, os_family=None):
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
+    _notify("Process List", f"Collected {len(procs)} running processes.", urgency="low")
     return {
         "status":    "completed",
         "stdout":    json.dumps(procs, indent=2),
@@ -74,6 +124,7 @@ def handle_get_process_list(params, os_family=None):
 
 
 def handle_restart_agent(params, os_family=None):
+    _notify("Agent Restart", "Agent restart has been approved and is now restarting.", urgency="critical", icon="dialog-warning")
     return {
         "status":       "completed",
         "stdout":       "Agent restart initiated.",
@@ -88,6 +139,7 @@ def handle_system_update(params, os_family=None):
     cmd    = SYSTEM_UPDATE_COMMANDS.get(family)
 
     if not cmd:
+        _notify("System Update Failed", f"No update command defined for OS: '{family}'", urgency="critical", icon="dialog-error")
         return {
             "status":    "failed",
             "stdout":    "",
@@ -95,12 +147,17 @@ def handle_system_update(params, os_family=None):
             "exit_code": 1,
         }
 
-    # Debian/Ubuntu need two chained commands — run via shell=True
+    _notify("System Update", "System update started — this may take a few minutes.", urgency="normal", icon="software-update-available")
+
     if family in ("debian", "ubuntu"):
-        cmd_str = "sudo apt-get update && sudo apt-get upgrade -y"
-        result  = run_command(cmd_str, shell=True, timeout=300)
+        result = run_command("sudo apt-get update && sudo apt-get upgrade -y", shell=True, timeout=300)
     else:
         result = run_command(cmd, shell=False, timeout=300)
+
+    if result.get("status") == "completed":
+        _notify("System Update", "System update completed successfully.", urgency="normal", icon="dialog-information")
+    else:
+        _notify("System Update Failed", result.get("stderr", "Unknown error"), urgency="critical", icon="dialog-error")
 
     return {
         "status":    result.get("status",    "failed"),
@@ -111,7 +168,8 @@ def handle_system_update(params, os_family=None):
 
 
 def handle_disk_usage(params, os_family=None):
-    path   = params.get("path", "/")
+    path = params.get("path", "/")
+    _notify("Disk Usage", f"Checking disk usage for: {path}", urgency="low")
     result = run_command(["df", "-h", path], shell=False, timeout=10)
     return {
         "status":    result.get("status",    "failed"),
@@ -124,7 +182,8 @@ def handle_disk_usage(params, os_family=None):
 def handle_collect_logs(params, os_family=None):
     log_path = params.get("log_path", "/var/log/syslog")
     lines    = str(params.get("lines", 50))
-    result   = run_command(["tail", "-n", lines, log_path], shell=False, timeout=15)
+    _notify("Log Collection", f"Collecting last {lines} lines from {log_path}", urgency="low")
+    result = run_command(["tail", "-n", lines, log_path], shell=False, timeout=15)
     return {
         "status":    result.get("status",    "failed"),
         "stdout":    result.get("stdout",    ""),
@@ -134,6 +193,7 @@ def handle_collect_logs(params, os_family=None):
 
 
 def handle_check_open_ports(params, os_family=None):
+    _notify("Port Scan", "Checking open ports...", urgency="low")
     result = run_command(["ss", "-tuln"], shell=False, timeout=10)
     return {
         "status":    result.get("status",    "failed"),
@@ -146,16 +206,18 @@ def handle_check_open_ports(params, os_family=None):
 def handle_get_service_status(params, os_family=None):
     service = params.get("service_name")
     if not service:
+        _notify("Service Status Failed", "No service name provided.", urgency="critical", icon="dialog-error")
         return {"status": "failed", "stdout": "", "stderr": "Missing service_name parameter", "exit_code": 1}
+    _notify("Service Status", f"Checking status of service: {service}", urgency="low")
     result = run_command(["systemctl", "status", service], shell=False, timeout=10)
+    status_text = "running" if result.get("exit_code") == 0 else "not running or failed"
+    _notify("Service Status", f"{service} is {status_text}.", urgency="low")
     return {
         "status":    result.get("status",    "failed"),
         "stdout":    result.get("stdout",    ""),
         "stderr":    result.get("stderr",    ""),
         "exit_code": result.get("exit_code", 1),
     }
-
-
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 INTERNAL_HANDLERS = {
