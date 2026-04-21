@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import subprocess
 
 from .details import get_linux_family
