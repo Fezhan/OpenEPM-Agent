@@ -1,4 +1,4 @@
-# agent/runner.py
+#!/usr/bin/env python
 import json
 import os
 import sys
@@ -31,24 +31,24 @@ def save_state(state):
 
 
 def ensure_registered():
-    """
-    Returns state dict with agent_id/auth_token, or None if enrollment failed.
-    """
     state = load_state()
 
     if state.get("agent_id") and state.get("auth_token"):
         return state
 
+    os_family = get_linux_family()
+
     try:
         response = register_agent(
             hostname=get_hostname(),
             mac_address=get_mac_address(),
-            os_info=get_linux_family(),
+            os_info=os_family,
             bootstrap_secret=BOOTSTRAP_SECRET,
         )
         state = {
             "agent_id":   response["agent_id"],
             "auth_token": response["auth_token"],
+            "os_family":  os_family,
         }
         save_state(state)
         return state
@@ -80,7 +80,7 @@ def run_loop():
             if not state:
                 state = ensure_registered()
                 if state:
-                    print(f"[agent] Enrolled: agent_id={state['agent_id']}")
+                    print(f"[agent] Enrolled: agent_id={state['agent_id']}, os_family={state.get('os_family', 'unknown')}")
                 else:
                     print(f"[agent] Enrollment failed. Retrying in {ENROLL_RETRY_INTERVAL}s...")
                     time.sleep(ENROLL_RETRY_INTERVAL)
@@ -88,6 +88,7 @@ def run_loop():
 
             agent_id   = state["agent_id"]
             auth_token = state["auth_token"]
+            os_family  = state.get("os_family") or get_linux_family()
 
             # ── Heartbeat ─────────────────────────────────────────────────────
             heartbeat(agent_id, auth_token)
@@ -100,9 +101,8 @@ def run_loop():
                 name         = command.get("definition", {}).get("name", "unknown")
                 print(f"[agent] Executing: {name} (execution_id={execution_id})")
 
-                result = dispatch_command(command)
+                result = dispatch_command(command, os_family=os_family)
 
-                # Submit result before any post-action
                 submit_result(
                     execution_id=execution_id,
                     auth_token=auth_token,
@@ -113,7 +113,6 @@ def run_loop():
                 )
                 print(f"[agent] Result submitted: {result['status']}")
 
-                # Handle post-actions (e.g. restart_agent restarts after ack)
                 post_action = result.get("_post_action")
                 if post_action == "restart":
                     print("[agent] Restarting agent process...")
