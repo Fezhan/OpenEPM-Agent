@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import argparse
 from openepm_agent.runner import run_loop, ensure_registered
 
