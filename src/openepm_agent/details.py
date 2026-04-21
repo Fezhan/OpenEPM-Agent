@@ -1,4 +1,4 @@
-# agent/details.py
+#!/usr/bin/env python
 import socket
 import psutil
 from pathlib import Path
