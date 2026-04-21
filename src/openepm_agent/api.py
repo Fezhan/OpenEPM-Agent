@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import requests
 from .config import SERVER_URL
 
