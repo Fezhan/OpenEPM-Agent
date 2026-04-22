@@ -7,6 +7,7 @@ def run_command(cmd, shell=False, timeout=3600):
     """
     Run a system command and return a structured result.
     """
+    print(f"[agent] run_command: cmd={cmd!r}, shell={shell}, timeout={timeout}")
     try:
         result = subprocess.run(
             cmd,

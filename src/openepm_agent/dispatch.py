@@ -6,59 +6,114 @@ from .systemfunctions import run_command
 from .details import get_linux_family
 
 # ── Desktop notification helper ───────────────────────────────────────────────
+def _loginctl_value(session_id: str, prop: str) -> str:
+    result = subprocess.run(
+        ["loginctl", "show-session", session_id, "-p", prop, "--value"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+def _get_active_desktop_user():
+    try:
+        result = subprocess.run(
+            ["loginctl", "list-sessions", "--no-legend"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+
+            session_id = parts[0]
+
+            active = _loginctl_value(session_id, "Active")
+            state = _loginctl_value(session_id, "State")
+            remote = _loginctl_value(session_id, "Remote")
+            sess_type = _loginctl_value(session_id, "Type")
+            name = _loginctl_value(session_id, "Name")
+            user = _loginctl_value(session_id, "User")
+
+            if (
+                active == "yes"
+                and state == "active"
+                and remote == "no"
+                and sess_type in {"x11", "wayland"}
+                and name
+                and user
+            ):
+                return name, int(user)
+
+    except Exception as exc:
+        print(f"[agent] active desktop user detection failed: {exc}")
+
+    return None, None
 
 def _notify(title: str, message: str, urgency: str = "normal", icon: str = "dialog-information"):
-    """
-    Send a libnotify desktop notification.
-    urgency: low | normal | critical
-    Runs as the logged-in user via DBUS_SESSION_BUS_ADDRESS.
-    Silently fails if notify-send is not available.
-    """
     try:
-        # Find the display session env for the logged-in user
-        env = os.environ.copy()
+        target_user, uid = _get_active_desktop_user()
+        if not target_user or uid is None:
+            print("[agent] notify skipped: no active graphical user found")
+            return
 
-        # Ensure DBUS session is available (needed when agent runs as root/service)
-        if "DBUS_SESSION_BUS_ADDRESS" not in env:
-            # Try to find it from a running user session
-            result = subprocess.run(
-                ["pgrep", "-u", env.get("USER", "handesh"), "-x", "Hyprland"],
-                capture_output=True, text=True
-            )
-            pid = result.stdout.strip()
-            if pid:
-                env_file = f"/proc/{pid}/environ"
-                try:
-                    with open(env_file, "r") as f:
-                        for entry in f.read().split("\0"):
-                            if "=" in entry:
-                                k, v = entry.split("=", 1)
-                                if k in ("DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"):
-                                    env[k] = v
-                except Exception:
-                    pass
-
-        subprocess.Popen(
-            ["notify-send", "--urgency", urgency, "--icon", icon, "--app-name", "OpenEPM Agent", title, message],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        # Build the exact command you know works, but parameterised
+        cmd = (
+            f'DISPLAY=:0 '
+            f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus '
+            f'notify-send '
+            f'--urgency {urgency} '
+            f'--icon {icon} '
+            f'--app-name "OpenEPM Agent" '
+            f'{title!r} {message!r}'
         )
-    except FileNotFoundError:
-        pass  # notify-send not installed — silently skip
-    except Exception:
-        pass
+
+        print(f"[agent] notify cmd (as {target_user}): {cmd}")
+
+        # Run through the user's login shell so PATH etc. match your own test
+        result = subprocess.run(
+            ["sudo", "-u", target_user, "bash", "-lc", cmd],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        print(f"[agent] notify rc={result.returncode}")
+        if result.stdout:
+            print(f"[agent] notify stdout={result.stdout.strip()}")
+        if result.stderr:
+            print(f"[agent] notify stderr={result.stderr.strip()}")
+
+    except Exception as exc:
+        print(f"[agent] notify failed: {exc}")
 
 
 # ── OS-aware command map ──────────────────────────────────────────────────────
 
 SYSTEM_UPDATE_COMMANDS = {
-    "arch":   ["sudo", "pacman", "-Syu", "--noconfirm"],
-    "debian": ["sudo", "apt-get", "update", "&&", "sudo", "apt-get", "upgrade", "-y"],
-    "ubuntu": ["sudo", "apt-get", "update", "&&", "sudo", "apt-get", "upgrade", "-y"],
-    "fedora": ["sudo", "dnf", "upgrade", "-y"],
-    "rhel":   ["sudo", "dnf", "upgrade", "-y"],
-    "centos": ["sudo", "yum", "update", "-y"],
+    "arch": [
+        ["pacman", "-Syu", "--noconfirm"],
+    ],
+    "debian": [
+        ["apt-get", "update"],
+        ["apt-get", "upgrade", "-y"],
+    ],
+    "ubuntu": [
+        ["apt-get", "update"],
+        ["apt-get", "upgrade", "-y"],
+    ],
+    "fedora": [
+        ["dnf", "upgrade", "-y"],
+    ],
+    "rhel": [
+        ["dnf", "upgrade", "-y"],
+    ],
+    "centos": [
+        ["yum", "update", "-y"],
+    ],
 }
 
 
@@ -136,34 +191,88 @@ def handle_restart_agent(params, os_family=None):
 
 def handle_system_update(params, os_family=None):
     family = (os_family or get_linux_family()).lower()
-    cmd    = SYSTEM_UPDATE_COMMANDS.get(family)
+    commands = SYSTEM_UPDATE_COMMANDS.get(family)
 
-    if not cmd:
-        _notify("System Update Failed", f"No update command defined for OS: '{family}'", urgency="critical", icon="dialog-error")
+    if not commands:
+        _notify(
+            "System Update Failed",
+            f"No update command defined for OS: '{family}'",
+            urgency="critical",
+            icon="dialog-error",
+        )
         return {
-            "status":    "failed",
-            "stdout":    "",
-            "stderr":    f"No system update command defined for OS family: '{family}'",
+            "status": "failed",
+            "stdout": "",
+            "stderr": f"No system update command defined for OS family: '{family}'",
             "exit_code": 1,
         }
 
-    _notify("System Update", "System update started — this may take a few minutes.", urgency="normal", icon="software-update-available")
+    _notify(
+        "System Update",
+        "System update started — this may take a few minutes.",
+        urgency="normal",
+        icon="software-update-available",
+    )
 
-    if family in ("debian", "ubuntu"):
-        result = run_command("sudo apt-get update && sudo apt-get upgrade -y", shell=True, timeout=300)
-    else:
-        result = run_command(cmd, shell=False, timeout=300)
+    combined_stdout = []
+    combined_stderr = []
 
-    if result.get("status") == "completed":
-        _notify("System Update", "System update completed successfully.", urgency="normal", icon="dialog-information")
-    else:
-        _notify("System Update Failed", result.get("stderr", "Unknown error"), urgency="critical", icon="dialog-error")
+    for cmd in commands:
+        result = run_command(cmd, shell=False, timeout=1800)
+        stdout = result.get("stdout", "") or ""
+        stderr = result.get("stderr", "") or ""
+
+        combined_stdout.append(stdout)
+        combined_stderr.append(stderr)
+
+        if result.get("exit_code", 1) != 0:
+            full_text = f"{stdout}\n{stderr}".lower()
+
+            manual_intervention_needed = any(token in full_text for token in [
+                "conflicting dependencies",
+                "conflict",
+                "unresolvable package conflicts",
+                "failed to prepare transaction",
+                "requires manual intervention",
+                "replace ",
+                "[y/n]",
+                "[Y/n]",
+            ])
+
+            if manual_intervention_needed:
+                _notify(
+                    "System Update Failed",
+                    "Manual intervention required: pacman encountered conflicts or interactive package replacement prompts.",
+                    urgency="critical",
+                    icon="dialog-warning",
+                )
+            else:
+                _notify(
+                    "System Update Failed",
+                    stderr or "Unknown error",
+                    urgency="critical",
+                    icon="dialog-error",
+                )
+
+            return {
+                "status": "failed",
+                "stdout": "\n".join(filter(None, combined_stdout)),
+                "stderr": "\n".join(filter(None, combined_stderr)),
+                "exit_code": result.get("exit_code", 1),
+            }
+
+    _notify(
+        "System Update",
+        "System update completed successfully.",
+        urgency="normal",
+        icon="dialog-information",
+    )
 
     return {
-        "status":    result.get("status",    "failed"),
-        "stdout":    result.get("stdout",    ""),
-        "stderr":    result.get("stderr",    ""),
-        "exit_code": result.get("exit_code", 1),
+        "status": "completed",
+        "stdout": "\n".join(filter(None, combined_stdout)),
+        "stderr": "\n".join(filter(None, combined_stderr)),
+        "exit_code": 0,
     }
 
 
