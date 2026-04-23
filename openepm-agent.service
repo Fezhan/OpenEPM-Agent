@@ -4,12 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-User=YOUR_USERNAME
-Group=YOUR_USERNAME
+User=root
+Group=root
 WorkingDirectory=/home/handesh/Documents/Uni/project/agent
 Environment="PATH=/home/handesh/Documents/Uni/project/agent/.venv/bin"
-ExecStart=/home/handesh/Documents/Uni/project/agent/.venv/bin/python -m openepm_agent.cli start
-Restart=always
+ExecStart=/home/handesh/Documents/Uni/project/agent/.venv/bin/python -m openepm_agent.cli star
+tRestart=always
 RestartSec=5
 
 [Install]
